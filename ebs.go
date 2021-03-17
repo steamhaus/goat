@@ -6,11 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 
 	"github.com/sevagh/goat/filesystem"
+
+	"gopkg.in/retry.v1"
 )
 
 //GoatEbs runs Goat for your EBS volumes - attach, mount, mkfs, etc.
@@ -150,9 +153,25 @@ func (e *EC2Instance) FindEbsVolumes(tagPrefix string) {
 
 	log.Info("Searching for EBS volumes")
 
-	volumes, err := e.findEbsVolumes(tagPrefix)
-	if err != nil {
-		log.Fatalf("Error when searching for EBS volumes: %v", err)
+	attempts := retry.Regular{
+		Total: 3 * time.Minute,
+		Delay: 2 * time.Second,
+	}
+
+
+	var volumes []EbsVol
+	for attempt := attempts.Start(nil); attempt.Next(); {
+		vols, err := e.findEbsVolumes(tagPrefix)
+		if err != nil && attempt.More() {
+			log.Info(err)
+			continue
+		}
+		if err != nil {
+			log.Fatalf("Error when searching for EBS volumes: %v", err)
+		}
+		volumes = vols
+		log.Debug(vols)
+		break
 	}
 
 	log.Info("Classifying EBS volumes based on tags")
